@@ -35,7 +35,7 @@ st.sidebar.caption(
 
 k_optimal = st.sidebar.slider("Jumlah Klaster (K)", min_value=2, max_value=8, value=3)
 
-st.title("🌳 Evaluasi, Klasterisasi & Pemetaan Spasial Ruang Terbuka Hijau (RTH)")
+st.title("🌳 Klasifikasi Zona Ruang Terbuka Hijau (RTH)")
 st.markdown(
     "Kabupaten Sukabumi — Metode **K-Means Clustering** "
     "(hasil terjemahan dari script R `RTH.R`)"
