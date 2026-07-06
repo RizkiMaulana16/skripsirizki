@@ -1,5 +1,5 @@
 # ==============================================================================
-# APLIKASI STREAMLIT: EVALUASI, CLUSTERING & PEMETAAN SPASIAL RTH
+# APLIKASI STREAMLIT: Klasifikasi Zona Ruang Terbuka Hijau
 # Diterjemahkan dari script RTH.R (K-Means Integrasi)
 # PROGRAM STUDI TEKNIK INFORMATIKA - UNIVERSITAS MUHAMMADIYAH SUKABUMI
 # AUTHOR ASLI: MOH RIZKI MAULANA
