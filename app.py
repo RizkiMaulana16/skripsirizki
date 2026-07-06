@@ -203,6 +203,65 @@ else:
     df_final["Status_Zona"] = df_final["Cluster_ID"].map(label_map)
 
 # ------------------------------------------------------------------------------
+# BAGIAN 5B: TABEL HASIL KLASIFIKASI PER KECAMATAN
+# ------------------------------------------------------------------------------
+st.header("📋 Hasil Klasifikasi per Kecamatan")
+st.markdown(
+    "Tabel berikut menampilkan **klaster (Cluster_ID) dan status zona** "
+    "untuk setiap kecamatan berdasarkan hasil K-Means di atas."
+)
+
+# Ringkasan jumlah kecamatan per zona/klaster
+ringkasan_zona = (
+    df_final.groupby("Status_Zona")["nama_kecamatan"]
+    .count()
+    .reset_index()
+    .rename(columns={"nama_kecamatan": "Jumlah Kecamatan"})
+    .sort_values("Jumlah Kecamatan", ascending=False)
+)
+col_ringkas1, col_ringkas2 = st.columns([1, 2])
+with col_ringkas1:
+    st.dataframe(ringkasan_zona, use_container_width=True, hide_index=True)
+with col_ringkas2:
+    fig_ringkas = px.bar(
+        ringkasan_zona,
+        x="Status_Zona",
+        y="Jumlah Kecamatan",
+        color="Status_Zona",
+        text="Jumlah Kecamatan",
+        title="Jumlah Kecamatan per Zona/Klaster",
+    )
+    fig_ringkas.update_layout(showlegend=False, xaxis_title="", yaxis_title="Jumlah Kecamatan")
+    st.plotly_chart(fig_ringkas, use_container_width=True)
+
+# Filter interaktif berdasarkan zona
+opsi_zona = ["Semua Zona"] + sorted(df_final["Status_Zona"].unique().tolist())
+filter_zona = st.selectbox("Filter berdasarkan Status Zona:", opsi_zona)
+
+tabel_klasifikasi = df_final[
+    ["nama_kecamatan", "Cluster_ID", "Status_Zona", "luas_kec_km2", "luas_rth_km2", "persentase_rth"]
+].rename(
+    columns={
+        "nama_kecamatan": "Nama Kecamatan",
+        "Cluster_ID": "Klaster",
+        "Status_Zona": "Status Zona",
+        "luas_kec_km2": "Luas Kecamatan (km²)",
+        "luas_rth_km2": "Luas RTH (km²)",
+        "persentase_rth": "Persentase RTH (%)",
+    }
+).sort_values("Klaster")
+
+if filter_zona != "Semua Zona":
+    tabel_klasifikasi = tabel_klasifikasi[tabel_klasifikasi["Status Zona"] == filter_zona]
+
+st.dataframe(
+    tabel_klasifikasi.round(2),
+    use_container_width=True,
+    hide_index=True,
+    height=400,
+)
+
+# ------------------------------------------------------------------------------
 # BAGIAN 6: VISUALISASI OUTPUT AKHIR
 # ------------------------------------------------------------------------------
 st.header("🗺️ Visualisasi Hasil Akhir")
@@ -264,16 +323,39 @@ with tab2:
             tooltip=row["nama_kecamatan"],
         ).add_to(peta_rth)
 
-    legend_html = """
-    <div style="position: fixed; bottom: 30px; right: 30px; z-index: 9999;
-                background-color: white; padding: 10px; border: 1px solid grey; border-radius: 5px;">
-        <b>Legenda Zona RTH</b><br>
-        <i style="background:green; width:10px; height:10px; display:inline-block;"></i> Zona RTH Tinggi<br>
-        <i style="background:orange; width:10px; height:10px; display:inline-block;"></i> Zona RTH Sedang<br>
-        <i style="background:red; width:10px; height:10px; display:inline-block;"></i> Zona RTH Rendah
-    </div>
+    # Legenda dibuat sebagai Leaflet Control asli (L.control), lalu di-addTo() langsung
+    # ke objek peta. Ini cara resmi Leaflet untuk elemen pojok peta, sehingga posisinya
+    # selalu benar dan tidak terpotong -- berbeda dengan <div> biasa yang ditempel di body
+    # halaman, yang gampang salah posisi karena Leaflet memakai CSS transform untuk pan/zoom.
+    from branca.element import MacroElement, Template
+
+    legend_template = """
+    {% macro script(this, kwargs) %}
+    var legend_{{ this.get_name() }} = L.control({position: 'bottomright'});
+    legend_{{ this.get_name() }}.onAdd = function (map) {
+        var div = L.DomUtil.create('div', 'info legend');
+        div.style.background = 'white';
+        div.style.padding = '10px 14px';
+        div.style.border = '1px solid grey';
+        div.style.borderRadius = '5px';
+        div.style.width = '190px';
+        div.style.boxShadow = '2px 2px 6px rgba(0,0,0,0.3)';
+        div.style.fontSize = '13px';
+        div.style.fontFamily = 'Arial, sans-serif';
+        div.style.whiteSpace = 'nowrap';
+        div.innerHTML =
+            '<b>Legenda Zona RTH</b><br>' +
+            '<i style="background:green;width:10px;height:10px;display:inline-block;margin-right:6px;"></i>Zona RTH Tinggi<br>' +
+            '<i style="background:orange;width:10px;height:10px;display:inline-block;margin-right:6px;"></i>Zona RTH Sedang<br>' +
+            '<i style="background:red;width:10px;height:10px;display:inline-block;margin-right:6px;"></i>Zona RTH Rendah';
+        return div;
+    };
+    legend_{{ this.get_name() }}.addTo({{ this._parent.get_name() }});
+    {% endmacro %}
     """
-    peta_rth.get_root().html.add_child(folium.Element(legend_html))
+    legend = MacroElement()
+    legend._template = Template(legend_template)
+    peta_rth.add_child(legend)
 
     st_folium(peta_rth, use_container_width=True, height=550)
 
