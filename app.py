@@ -202,6 +202,9 @@ else:
     df_final = df_clean.copy()
     df_final["Status_Zona"] = df_final["Cluster_ID"].map(label_map)
 
+# Pemetaan umum Cluster_ID -> label zona (dipakai lagi di fitur klasifikasi data baru)
+cluster_to_label = df_final.drop_duplicates("Cluster_ID").set_index("Cluster_ID")["Status_Zona"].to_dict()
+
 # ------------------------------------------------------------------------------
 # BAGIAN 5B: TABEL HASIL KLASIFIKASI PER KECAMATAN
 # ------------------------------------------------------------------------------
@@ -358,6 +361,135 @@ with tab2:
     peta_rth.add_child(legend)
 
     st_folium(peta_rth, use_container_width=True, height=550)
+
+# ------------------------------------------------------------------------------
+# BAGIAN 6B: FITUR KLASIFIKASI DATA / WILAYAH BARU
+# ------------------------------------------------------------------------------
+st.header("🔎 Klasifikasikan Kecamatan/Wilayah Baru")
+st.markdown(
+    "Masukkan data suatu wilayah untuk memprediksi masuk **klaster & zona RTH mana** "
+    "berdasarkan model K-Means yang sudah dilatih di atas (K = "
+    f"**{k_optimal}**)."
+)
+
+# Batas nilai asli (sebelum normalisasi) dari data training -> dipakai untuk
+# menormalisasi input baru dengan skala Min-Max yang SAMA seperti saat training.
+batas_min = data_model.min()
+batas_max = data_model.max()
+
+def klasifikasikan_wilayah(luas_kec_km2_baru: float, luas_rth_km2_baru: float):
+    """Menghitung persentase RTH, menormalisasi dgn skala training, lalu memprediksi klaster."""
+    persentase_baru = (luas_rth_km2_baru / luas_kec_km2_baru) * 100
+
+    norm_luas = (luas_kec_km2_baru - batas_min["luas_kec_km2"]) / (
+        batas_max["luas_kec_km2"] - batas_min["luas_kec_km2"]
+    )
+    norm_persen = (persentase_baru - batas_min["persentase_rth"]) / (
+        batas_max["persentase_rth"] - batas_min["persentase_rth"]
+    )
+
+    ekstrapolasi = not (0 <= norm_luas <= 1 and 0 <= norm_persen <= 1)
+    # Clamp ke rentang 0-1 supaya prediksi tetap masuk akal walau data di luar
+    # rentang training (ekstrapolasi Min-Max)
+    norm_luas_clamped = min(max(norm_luas, 0), 1)
+    norm_persen_clamped = min(max(norm_persen, 0), 1)
+
+    cluster_pred = model_kmeans.predict([[norm_luas_clamped, norm_persen_clamped]])[0] + 1
+    label_pred = cluster_to_label.get(cluster_pred, f"Klaster {cluster_pred}")
+
+    return {
+        "persentase_rth": persentase_baru,
+        "cluster": cluster_pred,
+        "label": label_pred,
+        "ekstrapolasi": ekstrapolasi,
+    }
+
+tab_manual, tab_batch = st.tabs(["✍️ Input Manual", "📁 Upload CSV (Banyak Wilayah)"])
+
+with tab_manual:
+    with st.form("form_klasifikasi_manual"):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            nama_wilayah_baru = st.text_input("Nama Wilayah (opsional)", value="Wilayah Baru")
+        with c2:
+            luas_kec_input = st.number_input(
+                "Luas Kecamatan (km²)", min_value=0.01, value=50.0, step=1.0, format="%.2f"
+            )
+        with c3:
+            luas_rth_input = st.number_input(
+                "Luas Ruang Terbuka Hijau (km²)", min_value=0.0, value=25.0, step=1.0, format="%.2f"
+            )
+        submit_manual = st.form_submit_button("🔍 Klasifikasikan", use_container_width=True)
+
+    if submit_manual:
+        hasil = klasifikasikan_wilayah(luas_kec_input, luas_rth_input)
+
+        warna_hasil = {
+            "Zona RTH Tinggi (Sangat Baik)": "success",
+            "Zona RTH Sedang (Cukup/Ideal)": "warning",
+            "Zona RTH Rendah (Kritis)": "error",
+        }.get(hasil["label"], "info")
+
+        colA, colB, colC = st.columns(3)
+        colA.metric("Persentase RTH", f"{hasil['persentase_rth']:.2f} %")
+        colB.metric("Klaster (Cluster_ID)", int(hasil["cluster"]))
+        colC.metric("Status Zona", hasil["label"])
+
+        getattr(st, warna_hasil)(
+            f"**{nama_wilayah_baru}** diklasifikasikan ke dalam **Klaster {hasil['cluster']}** "
+            f"— **{hasil['label']}**."
+        )
+        if hasil["ekstrapolasi"]:
+            st.warning(
+                "⚠️ Nilai input berada di luar rentang data training (ekstrapolasi), "
+                "sehingga hasil normalisasi dibatasi (clamp) ke rentang 0-1. "
+                "Prediksi tetap dihasilkan, namun tingkat keandalannya lebih rendah "
+                "dibanding wilayah yang nilainya masih dalam rentang data asli."
+            )
+
+with tab_batch:
+    st.markdown(
+        "Unggah CSV berisi kolom **`nama_wilayah`, `luas_kec_km2`, `luas_rth_km2`** "
+        "untuk mengklasifikasikan banyak wilayah baru sekaligus."
+    )
+    contoh_csv = pd.DataFrame(
+        {"nama_wilayah": ["Contoh A", "Contoh B"], "luas_kec_km2": [45.2, 60.0], "luas_rth_km2": [20.1, 15.5]}
+    )
+    st.download_button(
+        "⬇️ Unduh Template CSV",
+        data=contoh_csv.to_csv(index=False),
+        file_name="template_klasifikasi_baru.csv",
+        mime="text/csv",
+    )
+
+    file_batch = st.file_uploader("Unggah file CSV wilayah baru", type=["csv"], key="batch_klasifikasi")
+    if file_batch is not None:
+        try:
+            df_batch = pd.read_csv(file_batch)
+            hasil_batch = df_batch.apply(
+                lambda r: pd.Series(klasifikasikan_wilayah(r["luas_kec_km2"], r["luas_rth_km2"])),
+                axis=1,
+            )
+            df_batch_hasil = pd.concat([df_batch, hasil_batch], axis=1).rename(
+                columns={
+                    "persentase_rth": "Persentase RTH (%)",
+                    "cluster": "Klaster",
+                    "label": "Status Zona",
+                    "ekstrapolasi": "Ekstrapolasi?",
+                }
+            )
+            st.dataframe(df_batch_hasil.round(2), use_container_width=True, hide_index=True)
+            st.download_button(
+                "⬇️ Unduh Hasil Klasifikasi Batch",
+                data=df_batch_hasil.to_csv(index=False),
+                file_name="Hasil_Klasifikasi_Wilayah_Baru.csv",
+                mime="text/csv",
+            )
+        except Exception as e:
+            st.error(
+                f"Gagal memproses file: {e}. Pastikan kolom `nama_wilayah`, "
+                "`luas_kec_km2`, `luas_rth_km2` tersedia."
+            )
 
 # ------------------------------------------------------------------------------
 # BAGIAN 7: EKSPOR ARTIFAK DATA PENELITIAN
