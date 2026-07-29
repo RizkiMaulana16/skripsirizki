@@ -1,5 +1,5 @@
 # ==============================================================================
-# APLIKASI STREAMLIT: Klasifikasi Zona Ruang Terbuka Hijau
+# APLIKASI STREAMLIT: EVALUASI, CLUSTERING & PEMETAAN SPASIAL RTH
 # Diterjemahkan dari script RTH.R (K-Means Integrasi)
 # PROGRAM STUDI TEKNIK INFORMATIKA - UNIVERSITAS MUHAMMADIYAH SUKABUMI
 # AUTHOR ASLI: MOH RIZKI MAULANA
@@ -35,7 +35,7 @@ st.sidebar.caption(
 
 k_optimal = st.sidebar.slider("Jumlah Klaster (K)", min_value=2, max_value=8, value=3)
 
-st.title("🌳 Klasterisasi Zona Ruang Terbuka Hijau (RTH)")
+st.title("🌳 Evaluasi, Klasterisasi & Pemetaan Spasial Ruang Terbuka Hijau (RTH)")
 st.markdown(
     "Kabupaten Sukabumi — Metode **K-Means Clustering** "
     "(hasil terjemahan dari script R `RTH.R`)"
@@ -77,6 +77,12 @@ def load_and_clean(file_or_path):
 
     # Rekayasa fitur: persentase ketersediaan RTH
     df["persentase_rth"] = (df["luas_rth_km2"] / df["luas_kec_km2"]) * 100
+
+    # Batasi nilai persentase RTH maksimum 100% (mengatasi anomali data di mana
+    # luas RTH tercatat lebih besar dari luas kecamatan itu sendiri). Pembatasan
+    # dilakukan di sini agar konsisten di seluruh perhitungan turunan berikutnya:
+    # normalisasi Min-Max, centroid per klaster, tabel klasifikasi, dan peta.
+    df["persentase_rth"] = df["persentase_rth"].clip(upper=100)
 
     return df
 
@@ -380,6 +386,7 @@ batas_max = data_model.max()
 def klasifikasikan_wilayah(luas_kec_km2_baru: float, luas_rth_km2_baru: float):
     """Menghitung persentase RTH, menormalisasi dgn skala training, lalu memprediksi klaster."""
     persentase_baru = (luas_rth_km2_baru / luas_kec_km2_baru) * 100
+    persentase_baru = min(persentase_baru, 100)  # batasi maksimum 100%, konsisten dgn data training
 
     norm_luas = (luas_kec_km2_baru - batas_min["luas_kec_km2"]) / (
         batas_max["luas_kec_km2"] - batas_min["luas_kec_km2"]
