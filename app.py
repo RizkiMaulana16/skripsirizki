@@ -227,6 +227,9 @@ if k_optimal == 3:
         "baris paling bawah **Rendah**. Urutan ini akan selalu konsisten dengan nilai "
         "aslinya berapa pun Cluster_ID yang diberikan algoritma KMeans."
     )
+    # Urutan label eksplisit: Tinggi -> Sedang -> Rendah (dipakai untuk mengurutkan
+    # tabel/filter di bagian lain agar konsisten dengan tabel verifikasi di atas)
+    urutan_label_zona = [label_map[id_tinggi], label_map[id_sedang], label_map[id_rendah]]
 else:
     # Jika K != 3, urutkan label berdasarkan rank persentase_rth
     order = centroid_asli.sort_values("persentase_rth")["Cluster_ID"].tolist()
@@ -234,8 +237,17 @@ else:
     df_final = df_clean.copy()
     df_final["Status_Zona"] = df_final["Cluster_ID"].map(label_map)
 
+    # Urutan label dari rank tertinggi (persentase RTH terbesar) ke terendah
+    urutan_label_zona = [label_map[cid] for cid in reversed(order)]
+
 # Pemetaan umum Cluster_ID -> label zona (dipakai lagi di fitur klasifikasi data baru)
 cluster_to_label = df_final.drop_duplicates("Cluster_ID").set_index("Cluster_ID")["Status_Zona"].to_dict()
+
+# Menjadikan Status_Zona kolom kategorikal terurut (Tinggi -> Sedang -> Rendah), supaya
+# SEMUA tabel, filter, dan grafik yang memakai df_final["Status_Zona"] di bawah ini
+# otomatis mengikuti urutan yang sama dengan "Verifikasi Urutan Pelabelan Zona" di atas --
+# bukan lagi mengikuti urutan angka Cluster_ID mentah dari KMeans yang sifatnya acak.
+df_final["Status_Zona"] = pd.Categorical(df_final["Status_Zona"], categories=urutan_label_zona, ordered=True)
 
 # ------------------------------------------------------------------------------
 # BAGIAN 5B: TABEL HASIL KLASIFIKASI PER KECAMATAN
@@ -246,13 +258,13 @@ st.markdown(
     "untuk setiap kecamatan berdasarkan hasil K-Means di atas."
 )
 
-# Ringkasan jumlah kecamatan per zona/klaster
+# Ringkasan jumlah kecamatan per zona/klaster (diurutkan Tinggi -> Sedang -> Rendah)
 ringkasan_zona = (
-    df_final.groupby("Status_Zona")["nama_kecamatan"]
+    df_final.groupby("Status_Zona", observed=True)["nama_kecamatan"]
     .count()
+    .reindex(urutan_label_zona)
     .reset_index()
     .rename(columns={"nama_kecamatan": "Jumlah Kecamatan"})
-    .sort_values("Jumlah Kecamatan", ascending=False)
 )
 col_ringkas1, col_ringkas2 = st.columns([1, 2])
 with col_ringkas1:
@@ -269,8 +281,8 @@ with col_ringkas2:
     fig_ringkas.update_layout(showlegend=False, xaxis_title="", yaxis_title="Jumlah Kecamatan")
     st.plotly_chart(fig_ringkas, use_container_width=True)
 
-# Filter interaktif berdasarkan zona
-opsi_zona = ["Semua Zona"] + sorted(df_final["Status_Zona"].unique().tolist())
+# Filter interaktif berdasarkan zona (urutan mengikuti Tinggi -> Sedang -> Rendah)
+opsi_zona = ["Semua Zona"] + urutan_label_zona
 filter_zona = st.selectbox("Filter berdasarkan Status Zona:", opsi_zona)
 
 tabel_klasifikasi = df_final[
@@ -284,7 +296,7 @@ tabel_klasifikasi = df_final[
         "luas_rth_km2": "Luas RTH (km²)",
         "persentase_rth": "Persentase RTH (%)",
     }
-).sort_values("Klaster")
+).sort_values(["Status Zona", "Persentase RTH (%)"], ascending=[True, False])
 
 if filter_zona != "Semua Zona":
     tabel_klasifikasi = tabel_klasifikasi[tabel_klasifikasi["Status Zona"] == filter_zona]
