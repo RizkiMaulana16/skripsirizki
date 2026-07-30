@@ -147,6 +147,22 @@ data_model = df_clean[["luas_kec_km2", "persentase_rth"]].copy()
 def min_max_normalize(x):
     return (x - x.min()) / (x.max() - x.min())
 
+
+def df_ke_markdown(df: pd.DataFrame) -> str:
+    """Mengubah DataFrame menjadi tabel format Markdown (siap tempel ke Word/LaTeX).
+
+    Dibuat manual dan BUKAN memakai DataFrame.to_markdown(), karena to_markdown()
+    diam-diam membutuhkan pustaka pihak ketiga `tabulate`. Pustaka tersebut TIDAK
+    ikut terpasang secara default di Streamlit Cloud, sehingga pemakaiannya
+    memunculkan ImportError saat aplikasi di-deploy walaupun berjalan normal di
+    komputer lokal. Fungsi ini hanya memakai pandas, jadi aman di server manapun.
+    """
+    kolom = [str(c) for c in df.columns]
+    baris = [[("" if pd.isna(v) else str(v)) for v in rec] for rec in df.itertuples(index=False)]
+    garis = ["| " + " | ".join(kolom) + " |", "| " + " | ".join(["---"] * len(kolom)) + " |"]
+    garis += ["| " + " | ".join(r) + " |" for r in baris]
+    return "\n".join(garis)
+
 data_scaled = data_model.apply(min_max_normalize)
 data_scaled.index = df_clean["nama_kecamatan"]
 
@@ -348,7 +364,7 @@ if k_optimal == 3:
 
     # Versi siap-salin ke laporan (Word/LaTeX)
     with st.expander("📄 Salin tabel ini ke laporan (format teks)"):
-        st.code(tabel_verifikasi.round(2).to_markdown(index=False), language="markdown")
+        st.code(df_ke_markdown(tabel_verifikasi.round(2)), language="markdown")
         st.download_button(
             "⬇️ Unduh Tabel Karakteristik Klaster (CSV)",
             data=tabel_verifikasi.round(2).to_csv(index=False),
