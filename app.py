@@ -187,20 +187,46 @@ st.subheader("Nilai Centroid Asli per Klaster")
 st.dataframe(centroid_asli.round(3), use_container_width=True)
 
 if k_optimal == 3:
-    id_tinggi = centroid_asli.loc[centroid_asli["persentase_rth"].idxmax(), "Cluster_ID"]
-    id_rendah = centroid_asli.loc[centroid_asli["persentase_rth"].idxmin(), "Cluster_ID"]
-    id_sedang = [c for c in centroid_asli["Cluster_ID"] if c not in (id_tinggi, id_rendah)][0]
+    # PENTING: label zona HARUS mengikuti urutan (rank) nilai centroid persentase_rth,
+    # bukan urutan Cluster_ID hasil KMeans (Cluster_ID 1/2/3 tidak berkorelasi dengan
+    # tinggi-rendahnya nilai -- itu sebabnya label bisa tertukar kalau tidak diurutkan
+    # secara eksplisit). Di sini centroid diurutkan DESCENDING berdasarkan persentase_rth,
+    # lalu label Tinggi/Sedang/Rendah dipasangkan sesuai urutan tersebut.
+    centroid_terurut = centroid_asli.sort_values("persentase_rth", ascending=False).reset_index(drop=True)
 
-    def label_zona(cid):
-        if cid == id_tinggi:
-            return "Zona RTH Tinggi (Sangat Baik)"
-        elif cid == id_sedang:
-            return "Zona RTH Sedang (Cukup/Ideal)"
-        else:
-            return "Zona RTH Rendah (Kritis)"
+    id_tinggi = centroid_terurut.loc[0, "Cluster_ID"]   # persentase_rth TERBESAR
+    id_sedang = centroid_terurut.loc[1, "Cluster_ID"]   # persentase_rth TENGAH
+    id_rendah = centroid_terurut.loc[2, "Cluster_ID"]   # persentase_rth TERKECIL
+
+    label_map = {
+        id_tinggi: "Zona RTH Tinggi (Sangat Baik)",
+        id_sedang: "Zona RTH Sedang (Cukup/Ideal)",
+        id_rendah: "Zona RTH Rendah (Kritis)",
+    }
 
     df_final = df_clean.copy()
-    df_final["Status_Zona"] = df_final["Cluster_ID"].apply(label_zona)
+    df_final["Status_Zona"] = df_final["Cluster_ID"].map(label_map)
+
+    # Tabel verifikasi: menampilkan eksplisit urutan Cluster_ID -> centroid -> label,
+    # supaya pelabelan mudah dicek ulang (misalnya saat sidang) dan tidak ada keraguan
+    # bahwa label sudah sesuai urutan persentase RTH-nya.
+    st.subheader("✅ Verifikasi Urutan Pelabelan Zona (berdasarkan centroid persentase RTH)")
+    tabel_verifikasi = centroid_terurut.copy()
+    tabel_verifikasi["Status_Zona"] = tabel_verifikasi["Cluster_ID"].map(label_map)
+    tabel_verifikasi = tabel_verifikasi.rename(
+        columns={
+            "Cluster_ID": "Cluster_ID (hasil KMeans)",
+            "luas_kec_km2": "Rata-rata Luas Kecamatan (km²)",
+            "persentase_rth": "Rata-rata Persentase RTH (%)",
+        }
+    )[["Cluster_ID (hasil KMeans)", "Rata-rata Persentase RTH (%)", "Rata-rata Luas Kecamatan (km²)", "Status_Zona"]]
+    st.dataframe(tabel_verifikasi.round(2), use_container_width=True, hide_index=True)
+    st.caption(
+        "Urutan di atas diurutkan DESCENDING berdasarkan rata-rata Persentase RTH — "
+        "baris paling atas otomatis mendapat label **Tinggi**, baris tengah **Sedang**, "
+        "baris paling bawah **Rendah**. Urutan ini akan selalu konsisten dengan nilai "
+        "aslinya berapa pun Cluster_ID yang diberikan algoritma KMeans."
+    )
 else:
     # Jika K != 3, urutkan label berdasarkan rank persentase_rth
     order = centroid_asli.sort_values("persentase_rth")["Cluster_ID"].tolist()
