@@ -186,9 +186,60 @@ st.info(f"Nilai Skor Eksak DBI untuk konfigurasi K=3 adalah: **{dbi_scores[idx_k
 # ------------------------------------------------------------------------------
 st.header(f"🎯 Pemodelan K-Means (K={k_optimal})")
 
-model_kmeans = KMeans(n_clusters=k_optimal, random_state=42, n_init=25)
+# CENTROID FINAL YANG SUDAH DIKUNCI (FROZEN) hasil analisis skripsi (K=3, dataset asli
+# Dataset_rth.csv, scikit-learn==1.9.0, single-thread). Nilainya dalam skala Min-Max
+# ternormalisasi (0-1), urutan kolom: [luas_kec_km2, persentase_rth].
+#
+# KENAPA DIKUNCI (bukan di-fit ulang setiap kali app dibuka)?
+# K-Means adalah algoritma ITERATIF -- walau random_state sudah di-set, hasil akhirnya
+# tetap bisa sedikit berbeda antar server/komputer karena urutan komputasi
+# floating-point yang tidak selalu identik (dipengaruhi versi library, arsitektur CPU,
+# dsb). Untuk kebutuhan sidang/ujian yang menuntut hasil KONSISTEN, jauh lebih aman
+# menyimpan (freeze) centroid final yang sudah diverifikasi, lalu MENCOCOKKAN setiap
+# kecamatan ke centroid terdekat (jarak Euclidean) -- ini murni operasi matematis biasa
+# tanpa unsur iteratif/acak, sehingga hasilnya 100% identik di server manapun, kapan pun.
+FROZEN_CENTROIDS_K3 = np.array(
+    [
+        [0.5985891853761767, 0.19122718386522153],   # Cluster_ID 1 -> Zona RTH Rendah
+        [0.17626129894358117, 0.3969859234496372],   # Cluster_ID 2 -> Zona RTH Sedang
+        [0.2609649342454502, 0.8991189096190966],    # Cluster_ID 3 -> Zona RTH Tinggi
+    ]
+)
+
+
+def assign_nearest_centroid(points_scaled, centroids):
+    """Menentukan klaster berdasarkan centroid TERDEKAT (jarak Euclidean).
+    Operasi matematis murni (bukan iteratif/acak) -> hasilnya selalu identik
+    di lingkungan/mesin manapun untuk titik data & centroid yang sama persis."""
+    points_scaled = np.atleast_2d(np.asarray(points_scaled, dtype=float))
+    jarak = np.linalg.norm(points_scaled[:, None, :] - centroids[None, :, :], axis=2)
+    return jarak.argmin(axis=1) + 1  # +1 agar mulai dari 1
+
+
+menggunakan_dataset_asli = uploaded_file is None
 df_clean = df_clean.copy()
-df_clean["Cluster_ID"] = model_kmeans.fit_predict(data_scaled) + 1  # +1 agar mulai dari 1 (seperti R)
+
+if k_optimal == 3 and menggunakan_dataset_asli:
+    centroids_aktif = FROZEN_CENTROIDS_K3
+    df_clean["Cluster_ID"] = assign_nearest_centroid(data_scaled.values, centroids_aktif)
+    st.success(
+        "🔒 Memakai **centroid final terkunci (frozen)** hasil analisis skripsi (K=3, "
+        "dataset asli) — hasil klasterisasi dijamin identik di server manapun, kapan pun."
+    )
+else:
+    model_kmeans = KMeans(n_clusters=k_optimal, random_state=42, n_init=25)
+    df_clean["Cluster_ID"] = model_kmeans.fit_predict(data_scaled) + 1  # +1 agar mulai dari 1 (seperti R)
+    centroids_aktif = model_kmeans.cluster_centers_
+    if not menggunakan_dataset_asli:
+        st.info(
+            "ℹ️ Dataset kustom terdeteksi — model K-Means dihitung ulang (fit) sesuai "
+            "data yang diunggah."
+        )
+    else:
+        st.info(
+            f"ℹ️ K={k_optimal} (bukan K=3) dipakai untuk eksplorasi — model K-Means "
+            "dihitung ulang (fit) sesuai jumlah klaster yang dipilih."
+        )
 
 # ------------------------------------------------------------------------------
 # BAGIAN 5: INTERPRETASI DAN LABELING
@@ -452,7 +503,7 @@ def klasifikasikan_wilayah(luas_kec_km2_baru: float, luas_rth_km2_baru: float):
     norm_luas_clamped = min(max(norm_luas, 0), 1)
     norm_persen_clamped = min(max(norm_persen, 0), 1)
 
-    cluster_pred = model_kmeans.predict([[norm_luas_clamped, norm_persen_clamped]])[0] + 1
+    cluster_pred = assign_nearest_centroid([norm_luas_clamped, norm_persen_clamped], centroids_aktif)[0]
     label_pred = cluster_to_label.get(cluster_pred, f"Klaster {cluster_pred}")
 
     return {
