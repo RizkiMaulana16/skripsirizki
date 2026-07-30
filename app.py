@@ -5,6 +5,19 @@
 # AUTHOR ASLI: MOH RIZKI MAULANA
 # ==============================================================================
 
+# PENTING - HARUS DI PALING ATAS, SEBELUM numpy/scikit-learn DI-IMPORT:
+# Memaksa komputasi numerik berjalan single-thread. Tanpa ini, hasil K-Means bisa
+# SEDIKIT BERBEDA di server/komputer yang berbeda (walau random_state sudah di-fix),
+# karena komputasi paralel (multi-thread) menyebabkan urutan penjumlahan
+# floating-point berbeda tergantung jumlah CPU core yang dialokasikan server.
+# Ini penting supaya hasil klasterisasi selalu identik & konsisten setiap kali
+# aplikasi di-deploy ulang (misalnya saat Streamlit Cloud restart container).
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["BLIS_NUM_THREADS"] = "1"
+
 import streamlit as st
 import pandas as pd
 import numpy as np
