@@ -186,25 +186,29 @@ st.info(f"Nilai Skor Eksak DBI untuk konfigurasi K=3 adalah: **{dbi_scores[idx_k
 # ------------------------------------------------------------------------------
 st.header(f"🎯 Pemodelan K-Means (K={k_optimal})")
 
-# CENTROID FINAL YANG SUDAH DIKUNCI (FROZEN) hasil analisis skripsi (K=3, dataset asli
-# Dataset_rth.csv, scikit-learn==1.9.0, single-thread). Nilainya dalam skala Min-Max
-# ternormalisasi (0-1), urutan kolom: [luas_kec_km2, persentase_rth].
+# CENTROID FINAL DIKUNCI (FROZEN) -- dihitung OTOMATIS dari dataset asli saat pertama kali
+# aplikasi berjalan, lalu di-cache oleh Streamlit sehingga tidak dihitung ulang setiap refresh.
 #
-# KENAPA DIKUNCI (bukan di-fit ulang setiap kali app dibuka)?
-# K-Means adalah algoritma ITERATIF -- walau random_state sudah di-set, hasil akhirnya
-# tetap bisa sedikit berbeda antar server/komputer karena urutan komputasi
-# floating-point yang tidak selalu identik (dipengaruhi versi library, arsitektur CPU,
-# dsb). Untuk kebutuhan sidang/ujian yang menuntut hasil KONSISTEN, jauh lebih aman
-# menyimpan (freeze) centroid final yang sudah diverifikasi, lalu MENCOCOKKAN setiap
-# kecamatan ke centroid terdekat (jarak Euclidean) -- ini murni operasi matematis biasa
-# tanpa unsur iteratif/acak, sehingga hasilnya 100% identik di server manapun, kapan pun.
-FROZEN_CENTROIDS_K3 = np.array(
-    [
-        [0.5985891853761767, 0.19122718386522153],   # Cluster_ID 1 -> Zona RTH Rendah
-        [0.17626129894358117, 0.3969859234496372],   # Cluster_ID 2 -> Zona RTH Sedang
-        [0.2609649342454502, 0.8991189096190966],    # Cluster_ID 3 -> Zona RTH Tinggi
-    ]
-)
+# MENGAPA PENDEKATAN INI LEBIH BAIK DARIPADA HARDCODE?
+# Sebelumnya centroid di-hardcode secara manual. Masalahnya: setiap kali dataset direvisi
+# (misal: nilai RTH > 100% di-cap), nilai centroid normalisasi ikut berubah -- dan kode
+# lama yang hardcode TIDAK ikut berubah, sehingga hasil klasterisasi berbeda dari laporan.
+# Pendekatan baru ini memastikan centroid SELALU berasal dari dataset aktual yang dipakai,
+# sehingga tidak akan pernah ada ketidaksesuaian antara kode dan laporan.
+#
+# KENAPA HASILNYA TETAP KONSISTEN?
+# 1. os.environ OMP/MKL/OPENBLAS/BLIS = "1" di paling atas memaksa single-thread
+# 2. random_state=42 dan n_init=25 memastikan hasil yang sama di scikit-learn versi sama
+# 3. @st.cache_data memastikan KMeans hanya di-fit SEKALI selama sesi berjalan
+@st.cache_data
+def compute_frozen_centroids(data_scaled_values: np.ndarray) -> np.ndarray:
+    """Menjalankan KMeans K=3 pada dataset asli dan mengembalikan centroid-nya.
+    Di-cache oleh Streamlit -- hanya dihitung sekali per sesi."""
+    km_freeze = KMeans(n_clusters=3, random_state=42, n_init=25)
+    km_freeze.fit(data_scaled_values)
+    return km_freeze.cluster_centers_
+
+FROZEN_CENTROIDS_K3 = compute_frozen_centroids(data_scaled.values)
 
 
 def assign_nearest_centroid(points_scaled, centroids):
@@ -265,7 +269,7 @@ if k_optimal == 3:
     label_map = {
         id_tinggi: "Zona RTH Tinggi (Sangat Baik)",
         id_sedang: "Zona RTH Sedang (Cukup/Ideal)",
-        id_rendah: "Zona RTH Rendah (Kritis)",
+        id_rendah: "Zona RTH Rendah",
     }
 
     df_final = df_clean.copy()
@@ -314,12 +318,13 @@ cluster_to_label = df_final.drop_duplicates("Cluster_ID").set_index("Cluster_ID"
 df_final["Status_Zona"] = pd.Categorical(df_final["Status_Zona"], categories=urutan_label_zona, ordered=True)
 
 # ------------------------------------------------------------------------------
-# BAGIAN 5B: TABEL HASIL KLASIFIKASI PER KECAMATAN
+# BAGIAN 5B: TABEL HASIL KLASTERISASI PER KECAMATAN
 # ------------------------------------------------------------------------------
-st.header("📋 Hasil Klasifikasi per Kecamatan")
+st.header("📋 Hasil Klasterisasi per Kecamatan")
 st.markdown(
     "Tabel berikut menampilkan **klaster (Cluster_ID) dan status zona** "
-    "untuk setiap kecamatan berdasarkan hasil K-Means di atas."
+    "untuk setiap kecamatan berdasarkan hasil K-Means di atas. "
+    "⚠️ *Hasil klasterisasi ini bersifat informasi awal pendukung analisis, bukan keputusan final kebijakan tata ruang.*"
 )
 
 # Ringkasan jumlah kecamatan per zona/klaster (diurutkan Tinggi -> Sedang -> Rendah)
@@ -401,7 +406,7 @@ with tab1:
 
 with tab2:
     warna_map = {
-        "Zona RTH Rendah (Kritis)": "red",
+        "Zona RTH Rendah": "red",
         "Zona RTH Sedang (Cukup/Ideal)": "orange",
         "Zona RTH Tinggi (Sangat Baik)": "green",
     }
@@ -456,8 +461,8 @@ with tab2:
         div.style.whiteSpace = 'nowrap';
         div.innerHTML =
             '<b>Legenda Zona RTH</b><br>' +
-            '<i style="background:green;width:10px;height:10px;display:inline-block;margin-right:6px;"></i>Zona RTH Tinggi<br>' +
-            '<i style="background:orange;width:10px;height:10px;display:inline-block;margin-right:6px;"></i>Zona RTH Sedang<br>' +
+            '<i style="background:green;width:10px;height:10px;display:inline-block;margin-right:6px;"></i>Zona RTH Tinggi (Sangat Baik)<br>' +
+            '<i style="background:orange;width:10px;height:10px;display:inline-block;margin-right:6px;"></i>Zona RTH Sedang (Cukup/Ideal)<br>' +
             '<i style="background:red;width:10px;height:10px;display:inline-block;margin-right:6px;"></i>Zona RTH Rendah';
         return div;
     };
@@ -473,11 +478,13 @@ with tab2:
 # ------------------------------------------------------------------------------
 # BAGIAN 6B: FITUR KLASIFIKASI DATA / WILAYAH BARU
 # ------------------------------------------------------------------------------
-st.header("🔎 Klasifikasikan Kecamatan/Wilayah Baru")
+st.header("🔎 Prediksi Zona RTH Wilayah Baru")
 st.markdown(
     "Masukkan data suatu wilayah untuk memprediksi masuk **klaster & zona RTH mana** "
     "berdasarkan model K-Means yang sudah dilatih di atas (K = "
-    f"**{k_optimal}**)."
+    f"**{k_optimal}**). "
+    "Normalisasi menggunakan parameter min/max dari data training (47 kecamatan) yang dikunci — "
+    "konsisten dengan pendekatan yang dijelaskan di laporan."
 )
 
 # Batas nilai asli (sebelum normalisasi) dari data training -> dipakai untuk
@@ -536,7 +543,7 @@ with tab_manual:
         warna_hasil = {
             "Zona RTH Tinggi (Sangat Baik)": "success",
             "Zona RTH Sedang (Cukup/Ideal)": "warning",
-            "Zona RTH Rendah (Kritis)": "error",
+            "Zona RTH Rendah": "error",
         }.get(hasil["label"], "info")
 
         colA, colB, colC = st.columns(3)
