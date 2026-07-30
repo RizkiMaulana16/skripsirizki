@@ -113,6 +113,25 @@ except Exception as e:
 
 st.success(f"Data berhasil dimuat dari: **{sumber_data}** ({len(df_clean)} kecamatan)")
 
+# ------------------------------------------------------------------------------
+# PEMERIKSAAN KUALITAS DATA
+# Nama kecamatan yang tertulis dua kali (mis. karena ada spasi di belakang nama)
+# akan dihitung sebagai dua objek berbeda oleh K-Means, sehingga jumlah anggota
+# klaster jadi tidak sesuai dengan jumlah kecamatan yang sebenarnya.
+# ------------------------------------------------------------------------------
+_nama_normal = df_clean["nama_kecamatan"].astype(str).str.strip().str.lower()
+_duplikat = _nama_normal[_nama_normal.duplicated(keep=False)]
+if not _duplikat.empty:
+    _daftar = sorted(set(df_clean.loc[_duplikat.index, "nama_kecamatan"].str.strip().str.title()))
+    st.warning(
+        f"⚠️ **Peringatan kualitas data:** ditemukan nama kecamatan yang muncul lebih dari "
+        f"sekali → **{', '.join(_daftar)}**. Dataset berisi {len(df_clean)} baris, tetapi hanya "
+        f"{_nama_normal.nunique()} nama kecamatan unik. Baris duplikat tetap ikut dihitung "
+        "sebagai objek terpisah oleh K-Means, sehingga jumlah anggota klaster akan berbeda "
+        "dari jumlah kecamatan sebenarnya. Periksa kembali dataset Anda."
+    )
+
+
 with st.expander("🔍 Lihat Data Bersih (setelah data preparation)"):
     st.dataframe(
         df_clean[
@@ -281,20 +300,61 @@ if k_optimal == 3:
     st.subheader("✅ Verifikasi Urutan Pelabelan Zona (berdasarkan centroid persentase RTH)")
     tabel_verifikasi = centroid_terurut.copy()
     tabel_verifikasi["Status_Zona"] = tabel_verifikasi["Cluster_ID"].map(label_map)
+
+    # Jumlah anggota (kecamatan) per klaster — ditempelkan di baris yang SAMA dengan
+    # centroid-nya lewat .map(), BUKAN lewat penggabungan urutan manual. Ini yang
+    # mencegah kolom jumlah anggota bergeser/tertukar antar baris saat tabel disalin
+    # ke laporan. Total kolom ini harus selalu = jumlah kecamatan pada dataset.
+    jumlah_anggota = df_clean["Cluster_ID"].value_counts()
+    tabel_verifikasi["Jumlah Anggota (Kecamatan)"] = tabel_verifikasi["Cluster_ID"].map(jumlah_anggota)
+
     tabel_verifikasi = tabel_verifikasi.rename(
         columns={
-            "Cluster_ID": "Cluster_ID (hasil KMeans)",
-            "luas_kec_km2": "Rata-rata Luas Kecamatan (km²)",
+            "Cluster_ID": "ID Klaster (hasil KMeans)",
+            "luas_kec_km2": "Rata-rata Luas Wilayah (km²)",
             "persentase_rth": "Rata-rata Persentase RTH (%)",
+            "Status_Zona": "Label Zonasi RTH",
         }
-    )[["Cluster_ID (hasil KMeans)", "Rata-rata Persentase RTH (%)", "Rata-rata Luas Kecamatan (km²)", "Status_Zona"]]
+    )[[
+        "ID Klaster (hasil KMeans)",
+        "Label Zonasi RTH",
+        "Rata-rata Luas Wilayah (km²)",
+        "Rata-rata Persentase RTH (%)",
+        "Jumlah Anggota (Kecamatan)",
+    ]]
     st.dataframe(tabel_verifikasi.round(2), use_container_width=True, hide_index=True)
     st.caption(
         "Urutan di atas diurutkan DESCENDING berdasarkan rata-rata Persentase RTH — "
         "baris paling atas otomatis mendapat label **Tinggi**, baris tengah **Sedang**, "
         "baris paling bawah **Rendah**. Urutan ini akan selalu konsisten dengan nilai "
-        "aslinya berapa pun Cluster_ID yang diberikan algoritma KMeans."
+        "aslinya berapa pun Cluster_ID yang diberikan algoritma KMeans. "
+        "**Tabel ini adalah tabel yang harus disalin ke laporan** — seluruh kolom "
+        "(luas, persentase, jumlah anggota) sudah dijamin berada pada baris yang benar."
     )
+
+    # Sanity check otomatis: total jumlah anggota & total luas wilayah harus masuk akal.
+    # Kalau tabel di laporan salah salin (kolom bergeser), cek ini akan langsung ketahuan.
+    total_anggota = int(tabel_verifikasi["Jumlah Anggota (Kecamatan)"].sum())
+    total_luas_rekon = float(
+        (tabel_verifikasi["Rata-rata Luas Wilayah (km²)"] * tabel_verifikasi["Jumlah Anggota (Kecamatan)"]).sum()
+    )
+    st.caption(
+        f"🔎 Uji konsistensi: total anggota = **{total_anggota} kecamatan** "
+        f"(harus sama dengan {len(df_clean)}), dan rekonstruksi total luas wilayah dari "
+        f"tabel = **{total_luas_rekon:,.2f} km²** (harus mendekati total luas "
+        f"Kabupaten Sukabumi ± 4.146 km²). Jika angka rekonstruksi jauh melenceng, "
+        "berarti ada kolom yang tertukar barisnya."
+    )
+
+    # Versi siap-salin ke laporan (Word/LaTeX)
+    with st.expander("📄 Salin tabel ini ke laporan (format teks)"):
+        st.code(tabel_verifikasi.round(2).to_markdown(index=False), language="markdown")
+        st.download_button(
+            "⬇️ Unduh Tabel Karakteristik Klaster (CSV)",
+            data=tabel_verifikasi.round(2).to_csv(index=False),
+            file_name="Tabel_Karakteristik_Klaster_RTH.csv",
+            mime="text/csv",
+        )
     # Urutan label eksplisit: Tinggi -> Sedang -> Rendah (dipakai untuk mengurutkan
     # tabel/filter di bagian lain agar konsisten dengan tabel verifikasi di atas)
     urutan_label_zona = [label_map[id_tinggi], label_map[id_sedang], label_map[id_rendah]]
